@@ -78,6 +78,7 @@ Two new internal interfaces "if1" and "if2" are created and they are attached to
         ifconfig if2 192.168.1.2/24
 
 
+
 ** INCOMING PACKET ROUTING **
 
 Packets arriving via the front panel ports are routed using the default routing table as part of default NS and hence they work normally without any design change.
