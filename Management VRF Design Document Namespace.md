@@ -79,7 +79,7 @@ Two new internal interfaces "if1" and "if2" are created and they are attached to
 
 
 
-** INCOMING PACKET ROUTING **
+**INCOMING PACKET ROUTING**
 
 Packets arriving via the front panel ports are routed using the default routing table as part of default NS and hence they work normally without any design change.
 Packets arriving on management interface need the following NAT based design. By default, such packets are routed using the linux stack running in management NS which is unaware of the applications running in default NS. SNAT and DNAT rules are used for internally routing the packets between the management NS and default NS and viceversa. Default iptables rules shall be added in the management NS in order to route those packets to "iip2".
@@ -114,11 +114,11 @@ After routing, use POST routing SNAT rule to change the source IP address to iip
 This rule does source NAT for all packets that are routed through iif1 and changes the source IP to iip1. Original source IP will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. Once if the source IP is changed to iip2, packets are sent out of iif1, which are received in iif2 by the default namespace. All those packets will be routed using the default routing instance. These packets with destination IP iip2 are self destined packets and hence they will be handed over to the appropriate application deamons running in the default namespace.
 
 
-** OUTGOING PACKET ROUTING **
+**OUTGOING PACKET ROUTING**
 
 Packets that are originating from application deamons running in default namespace will be routed using the default routing table. Applications that need to operate on front panel ports work normally without any design change. Applications that need to operate on management namespace need the following design using DNAT & SNAT rules.
 
-** Applications Spawned From Shell:**
+**Applications Spawned From Shell:**
 
 Whenever user wants the applications like "Ping", "Traceroute",etc., to run on management network, "ip netns exec management <actual command>" should be used.
 
@@ -127,14 +127,14 @@ Example: C10: Execute ping in management VRF
 
 This command will be executed in the management namespace (VRF) context and hence all packets will be routed using the management routing table and management interface. 
 
-** Applications triggered internally: **
+**Applications triggered internally:**
 
 Whenever user wants the applications to be triggerd via the management namespace (VRF), a new command (specific to application) should be executed to specify the VRF (namespace) to use.
 This command results in doing few changes in the packet flow as follows and it added DNAT & SNAT rules in management namespace to send and receive the packtes via management network.
 1) Destination IP address of packet is changed to "iip1". This results in default VRF routing instance to send all those packets to veth pair, which results in reaching management namespace.
 2) Destination port number of packet is changed to an internal port number. This will be used by management namespace for finding the appropriate DNAT rule in its iptables that is requried to identify the actual destiation IP to which the packet has to be sent.
 
-** Tacacs Example **
+**Tacacs Example**
 
 For example, if user connects to the device from external device using SSH (either via management network or via data network), SSH internally uses tacacs (if enabled) to authenticate the user. If the tacacs server is part of management network, following command should be executed to inform the tacacs module to use the management VRF.
 
