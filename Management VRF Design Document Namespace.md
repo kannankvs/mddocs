@@ -1,7 +1,7 @@
 # Management VRF Design Document
 
 ## Introduction
-Management VRF is a subset of Virtual Routing and Forwarding, and provides a separation between the management network traffic and the data plane network traffic. For all VRFs the main routing table is the default table for all data plane ports. With management VRF a second routing table, mgmt, is used for routing through the management ethernet ports of the switch. aaaaa
+Management VRF is a subset of Virtual Routing and Forwarding, and provides a separation between the management network traffic and the data plane network traffic. For all VRFs the main routing table is the default table for all data plane ports. With management VRF a second routing table, mgmt, is used for routing through the management ethernet ports of the switch. 
 
 The following design for Management VRF leverages Linux Stretch kernel(4.9) Namespace concept for implementing management VRF on SONiC; refer to [design comparison](#design_comparison) for trade-offs of that approach vs. l3mdev-based design.  
  
