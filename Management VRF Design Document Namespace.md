@@ -105,11 +105,8 @@ For all packets arriving on management interface, change the destination IP addr
     C12: Create DNAT rule to change destination IP to iip2 (ex: for SSH packets with destination port 22): 
          ip netns exec management iptables -t nat -A MgmtVrfChain -p tcp --dport 22 -j DNAT --to-destination 192.168.1.2   
 
-Similarly, add rules for each application destination port numbers (SSH, SNMP, FTP, HTTP, NTP, TFTP, NetConf) as required. Once if the destination IP is changed to iip2, management namespace routing instance will take of routing these packets via the outport iif1. Original destination IP will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets.
-When user wants to run any new application, a new rule with the appropriate dport should be added.
-
-Alternatively, if all packets arriving in management interface can be handed over to the applications running in default NS without validating the destination port, a default rule for all application port numbers can be added in this rule (by ommitting the --dport) instead of application specific rule. 
-This design point should be reviewed and a decision has to be taken.
+Similarly, add rules for each application destination port numbers (SSH, SNMP, FTP, HTTP, NTP, TFTP, NetConf) as required. Once the destination IP is changed to iip2, management namespace routing instance route these packets via the interface if1. Original destination IP will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets.
+For new application, a new rule with application destination port should be added.
 
 **Step2:** 
 After routing, use POST routing SNAT rule to change the source IP address to iip1 as given in the following example.
@@ -117,7 +114,7 @@ After routing, use POST routing SNAT rule to change the source IP address to iip
     C13: Add a post routing SNAT rule to change Source IP address:
          ip netns exec management iptables -t nat -A POSTROUTING -o if1 -j SNAT --to-source 192.168.1.1
 
-This rule does source NAT for all packets that are routed through iif1 and changes the source IP to iip1. Original source IP will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. Once if the source IP is changed to iip2, packets are sent out of iif1, which are received in iif2 by the default namespace. All those packets will be routed using the default routing instance. These packets with destination IP iip2 are self destined packets and hence they will be handed over to the appropriate application deamons running in the default namespace.
+Original source IP will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. After changing source IP packets are sent out of if1 and received in if2 in default NS. All packets will be routed using the default routing instance. These packets with destination IP iip2 are self destined packets and hence they will be handed over to the appropriate application deamons running in the default namespace.
 
 
 **OUTGOING PACKET ROUTING**
@@ -135,15 +132,15 @@ This command will be executed in the management namespace (VRF) context and henc
 
 **Applications triggered internally:**
 
-This sub-section explains the flow for internal applications like DNS, TACACS, SNMP trap, that are used by the application daemons like SSH (uses TACACS), Ping (uses DNS), SNMPD (sends traps). Daemons use the internal POSIX APIs of internal applications to generate the packets. If such packets need to travel via the management namespace, user should configure "--use-mgmt-vrf" as part of the server  address configuration.
-Such application modules are using the following DNAT & SNAT iptables rules to route the packets from default VRF context to the management VRF context and then to send it out of management interface. Application specific design enhancement is explained in the appropriate sub-sections.
+This section explains the flow for internal applications like DNS, TACACS, SNMP trap, that are used by the application daemons like SSH (uses TACACS), Ping (uses DNS), SNMPD (sends traps). Daemons use the internal POSIX APIs of internal applications to generate the packets. If such packets need to travel via the management namespace, user should configure "--use-mgmt-vrf" as part of the server  address configuration.
+These application's are using the following DNAT & SNAT iptables rules to route the packets from default VRF context to the management VRF context and sending out of management interface. Application specific design enhancement is explained below in appropriate sections.
 
-   1) Destination IP address of packet is changed to "iip1". This results in default VRF routing instance to send all those packets to veth pair, which results in reaching management namespace.
+   1) Destination IP address of packet is changed to "iip1". This results in default VRF routing instance to send all the packets to veth pair, resulting in reaching management namespace.
 
     C15: Create DNAT rule for tacacs server IP address
          ip netns exec management iptables -t nat -A PREROUTING -i if1 -p tcp --dport 62000 -j DNAT --to-destination <actual_tacacs_server_ip>:<dport_of_tacacs_server>
 
-   2) Destination port number of packet is changed to an internal port number. This will be used by management namespace for finding the appropriate DNAT rule in its iptables that is requried to identify the actual destiation IP to which the packet has to be sent.
+   2) Destination port number of packet is changed to an internal port number. This will be used by management namespace for finding the appropriate DNAT rule in management's iptables that is requried to identify the actual destiation IP to which the packet has to be sent.
 
     C16: Create SNAT rule for source IP masquerade
          ip netns exec management iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
@@ -173,7 +170,6 @@ Customers using config_db.json file for loading the configuration can run the sa
 
 ##### Script for DHCP
 During DHCP the IP address is acquired for eth0 as a part of the dhcp protocol scripts and images can be retrieved from the dhcp server. Currently minigraph.xml and acl.json files are received using options. There will be another option to get the dhcp_mgmt_vrf.sh script which will configure the management VRF as a process of dhcp exit hooks procedure. The eth0 IP address and management VRF name will be copied to config_db.json file and saved in the ConfigDb so that application which require this information can query the ConfigDb and get the details.
-HARISH_TO_CHECK: If eth0 IP is saved in config_db.json, will it not get applied automatically in next reboot instead of doing DHCP again? Missing something?
 
 ![DHCP Flow](Management%20VRF%20Design%20Document%20-%20DHCP%20Flow.svg)
 
@@ -191,7 +187,6 @@ The upgraded config_db.json schema as follows.
 
 #### Show Commands
 Following show commands need to be implemented to display the VRF configuration.
-HARISH_TO_CHECK:lease check and update.
 
 | SONiC wrapper command             | Linux command                    | Description
 |---                                |---                               |---
@@ -203,17 +198,17 @@ HARISH_TO_CHECK:lease check and update.
 | `show vrf address <vrfname>`      | `ip address show vrf <vrfname>`  | Displays IP related info for VRF
 
 ### IP Application Design
-This section explains the behavior of each application on the default VRF and management VRF. Application functionality differs based on whether the application is used to connect to the application daemons running in the device or the application is triggered from the device.
+This section explains the behavior of each application on the default VRF and management VRF. Application functionality differs based on whether the application is used to connect to the application daemons running in the device or application is running from the device.
 
 #### Application Daemons In The Device
-All application daemons run in the default namespace. All packets arriving in FPP are handled by default namespace as it is.
+All application daemons run in the default namespace. All packets arriving in FPP are handled by default namespace.
 All packets arriving in the management ports will be routed to the default VRF using the prerouting DNAT rule and post routing SNAT rule. Appropriate conntract entries will be created.
 All reply packets from application daemons use the conntrack entries to do the reverse routing from default namespace to management namespace and then routing through the management port eth0.
 
 #### Applications Originating From the Device
-Applications originating from the device need to know the VRF in which it has to run. "ping", "traceroute","dhcclient", "apt-get", "curl" & "ssh" can be executed in management namespace using "ip netns exec management <command_to_execute>", hence these applications continue to work on both management and default VRF's without any change. Applications like TACACS & DNS are used by other applications using the POSIX APIs provided by them. Additional iptables rules need to be added (as explained in following sub-sections) to make them work through the management VRF. 
+Applications originating from the device need to know the VRF in which it has to run. "ping", "traceroute","dhcclient", "apt-get", "curl" & "ssh" can be executed in management namespace using "ip netns exec management <command_to_execute>", hence these applications continue to work on both management and default VRF's without any change. Applications like TACACS & DNS are used by other applications using the POSIX APIs provided by them. Additional iptables rules need to be added (as explained in following sections) to make them work through the management VRF. 
 
-HARISH_TO_CHECK: I think that dhclient has to be executed even before management namespace is created. Or, should we execute them using "ip netns exec"? Change the above paragraph accordingly.
+dhclient has to be executed using "ip netns exec" in the management VRF context.
 
 ##### TACACS Implementation
 TACACS is a library function that is used by applications like SSHD to authenticate the users. When users connect to the device using SSH and if the "aaa" authentication is configured to use the tacacs+, it is expected that device shall connect to the tacacs+ server via management VRF (or default VRF) and authenticate the user. TACACS implementation contains two sub-modules, viz, NSS and PAM. These module code is enhanced to support an additional parameter "--use-mgmt-vrf" while configuring the tacacs+ server IP address. When user specifies the --use-mgmt-vrf as part of "config tacacs add --use-mgmt-vrf <tacacs_server_ip>" command, this is passed as an additional parameter to the config_db's TACPLUS_SERVER tag. This additional parameter is read using the script files/image_config/hostcfgd. This script is enhanced to add/delete the following rules as and when the tacacs server IP address is added or deleted.
@@ -251,12 +246,10 @@ Following diagram explains the internal packet flow for the tacacs packets that 
 
 #### SNMP
 The net-snmp daemon runs on the default namespace. SNMP request packets coming from FPP are directly handed over using default namespace. SNMP requests from management interfaces are routed to default namespace using the DNAT & SNAT (and conntrack entries for reply packets) similar to other applications like SSH.
-W.r.t. SNMP traps originated from the device, the design similar to tacacs will be implemented to route them through management namespace.
-HARISH_TO_CHECK: Update this.
+W.r.t. SNMP traps originated from the device, the design similar to tacacs will be implemented to route them through management namespace. 
  
 #### DHCP Client 
 DHCP client gets the IP address for the management ports from the DHCP server, since it is enabled on a per interface the IP address is received automatically. DHCP Client has an additional option now to get the mgmt_vrf_config.sh script from the DHCP server. This script will be run as apart of the dhcp exit hooks and will configure management VRF when the system boots or dhclient command is issued. The script will also write the vrfname and eth0 ip to config_db.json and load it to be saved to ConfigDb. Applications requiring the MGMT interface configs can be retrived from ConfigDb. The default route that is being added to the default VRF needs to be removed. If the new option in dhclient.conf is not there the system behaves in normal mode.
-HARISH_TO_CHECK: Need to decide on when the DHCP happens during reboot. Will the management namespace be available before the DHCP is successful?
 
 #### DHCP Relay 
 DHCP relay is expected to work via the default VRF. DHCP Relay shall receive the DHCP requests from servers via the front-panel ports and it will send it to DHCP server through front-panel ports. No changes are reqiured.
