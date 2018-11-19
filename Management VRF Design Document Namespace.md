@@ -30,7 +30,7 @@ Without namespace (NS), the set of network interfaces and routing table entries 
 
 As of this writing, SONiC uses Debian Stretch, based on Linux 4.9 kernel, which has limited VRF support. E.g., it does not support the `CGROUPS_BPF` feature which is required for associating the application to a particular VRF. Full fledged VRF support is available only in Linux 4.15 and above. This means that the l3mdev based solution is not feasible without doing enhancements in linux kernel and in application code. Hence, the l3mdev based VRF solution has been dropped and namespace based solution has been chosen.
 
-By default, linux comes up with the default namespace, all interfaces will be part of this default namespace. Whenever management VRF support is requried, a new namespace by name "management" is created and the management port "eth0" is moved to this namespace. Following linux commands shall be internally used for creating the same.
+By default, linux comes up with the default namespace, all interfaces will be part of this default namespace. Whenever management VRF support is requried, a new namespace by name "management" is created and the management port "eth0" is moved to this namespace. Following linux commands shall be internally used for creating the same. Commands used in this document are numbered as C1, C2, C3, etc., that are referred in other sub-sections of this document.
 
     C1: ip netns add management
     C2: ip link set dev eth0 netns management
@@ -82,7 +82,7 @@ Two new internal interfaces "if1" and "if2" are created and they are attached to
 
 
 
-**INCOMING PACKET ROUTING**
+### INCOMING PACKET ROUTING
 
 Packets arriving via the front panel ports are routed using the default routing table as part of default NS and hence they work normally without any design change.
 Packets arriving on management interface need the following NAT based design. By default, such packets are routed using the linux stack running in management NS which is unaware of the applications running in default NS. DNAT & SNAT rules are used for internally routing the packets between the management NS and default NS and viceversa. Default iptables rules shall be added in the management NS in order to route those packets to internal IP of default VRF "iip2".
@@ -120,7 +120,7 @@ After routing, use POST routing SNAT rule to change the source IP address to iip
 This rule does source NAT for all packets that are routed through iif1 and changes the source IP to iip1. Original source IP will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. Once if the source IP is changed to iip2, packets are sent out of iif1, which are received in iif2 by the default namespace. All those packets will be routed using the default routing instance. These packets with destination IP iip2 are self destined packets and hence they will be handed over to the appropriate application deamons running in the default namespace.
 
 
-**OUTGOING PACKET ROUTING**
+### OUTGOING PACKET ROUTING
 
 Packets that are originating from application deamons running in default namespace will be routed using the default routing table. Applications that need to operate on front panel ports work normally without any design change. Applications that need to operate on management namespace need the following design using DNAT & SNAT rules.
 
@@ -161,46 +161,41 @@ Implementation of namespace based solution using Linux 4.9 kernel involves the f
 
 ### Management VRF Creation
 #### Initialization Sequence & Default Behavior
-This section describes the default behavior and configuration of management VRF for static IP and dhcp scenarios. After upgrading to this management VRF supported SONiC image, the binary boots in normal mode with no management VRF created. Customers can either continue to operate in normal mode without any management VRF, or, they can run a script to configure/enable management VRF. 
+This section describes the default behavior and configuration of management VRF for static IP and dhcp scenarios. After upgrading to this management VRF supported SONiC image, the binary boots in normal mode with no management VRF created. Customers can either continue to operate in normal mode without any management VRF, or, they can run a config command to enable management VRF. 
 
-##### Minigraph users - With Static IP
-The SONiC binary has the minigraph.py with vrfname set to "none" for ManagementIPInterfaces. Loading the minigraph.xml and saving will create the config_db.json file which has the vrfname set to "None". Management VRF can be created by running the script create-mgmt-vrf.sh, the script will change the vrfname to the MGMT tag as "management" in the config_db.json and load it to save in ConfigDb. It will restart the "interfaces-config" service and other services. "interfaces-config" service executes the "interfaces-config.sh" script that takes care of creating the management namespace (VRF) and attaching eth0 to the management namespace. It also creates the required iptables rules explained earlier (linux commands C1 to C10). On completion of this script execution, management namespace (VRF) is created and ready for use, no reboot is required. The below figure shows the sequence of creation of management VRF.
-
-![Flow 1](Management%20VRF%20Design%20Document%20-%20Flow%201.svg) 
-
-##### Non-Minigraph users - With Static IP
-Customers using config_db.json file for loading the configuration can run the same script create-mgmt-vrf.sh that takes care of management VRF creation as stated above. 
-
-##### Script for DHCP
-During DHCP the IP address is acquired for eth0 as a part of the dhcp protocol scripts and images can be retrieved from the dhcp server. Currently minigraph.xml and acl.json files are received using options. There will be another option to get the dhcp_mgmt_vrf.sh script which will configure the management VRF as a process of dhcp exit hooks procedure. The eth0 IP address and management VRF name will be copied to config_db.json file and saved in the ConfigDb so that application which require this information can query the ConfigDb and get the details.
-HARISH_TO_CHECK: If eth0 IP is saved in config_db.json, will it not get applied automatically in next reboot instead of doing DHCP again? Missing something?
-
-![DHCP Flow](Management%20VRF%20Design%20Document%20-%20DHCP%20Flow.svg)
+    C16: config vrf enable-mgmt-vrf
+    
+This command configures the tag "MANAGEMENT_VRF_CONFIG" in the ConfigDB (given below) and it restarts the "interfaces-config" service. The existing jinja template file "interfaces.j2" is enhanced to check this configuration and create the /etc/network/interfaces file with or without the "eth0" in the configuration. When management VRF is enabled, it does not add the "eth0" interface in this /etc/network/interfaces file. Instead, the service uses a new jinja template file "interfaces_mgmt.j2" and creates a new VRF specific configuration file /etc/network/interfaces.management.
+This solution is based on the netns solution proposed at https://github.com/m0kct/debian-netns 
+As specified in the solution, additional scripts are added, viz,  "/etc/network/if-pre-up.d/netns", "/etc/network/if-up.d/netns" and "/etc/network/if-down.d/netns. These scripts use the configuration files and follows the sequence of steps explained in the design section that takes care of the following.
+    1. Creates the management namespace using command C1
+    2. Attaches eth0 to the management namespace using command C2
+    3. Configures IP address for eth0 in management namespace and adds the default route in management namespace using commands C3 & C4. This happens only when user had already configured the eth0 IP address and default gateway address using the MGMT_INTERFACE configuration. If this is not configured, it defaults to "dhcp".
+    4. Creates the veth pair with two interfaces (if1 & if2) using commands C5, C6, C7
+    5. Configures IP addresses for if1 and if2 using commands C8 & C9 
+    6. Adds iptables DNAT & SNAT rules as given in C10, C11, C12, C13 & C16. 
+    7. As part of DNAT rules, port numbers corresponding to the application deamons SSH, FTP, HTTP, HTTPS, SNMP, TFTP are added to accept packets from those applications. If any other application port number should be accepted in management interface, correponding DNAT rule should be added using the command C12 in linux shell.
 
 #### ConfigDB Schema
-The upgraded config_db.json schema as follows.
+The upgraded config_db.json schema to store the flag for enabling/disabling management VRF is as follows. Default value is set to false (by default management VRF is disabled). Users can enable it using the "config vrf enable-mgmt-vrf" command as explained above.
 
 ```
-"MGMT_INTERFACE": {
-    "eth0|10.11.150.19/24": {
-        "gwaddr": "10.11.150.1"
-        "vrfname": "management"
+"MANAGEMENT_VRF_CONFIG": {
+    "vrf_global": {
+        "enable_mgmt_vrf": "false" 
      }
 }
 ```
 
 #### Show Commands
 Following show commands need to be implemented to display the VRF configuration.
-HARISH_TO_CHECK:lease check and update.
 
-| SONiC wrapper command             | Linux command                    | Description
-|---                                |---                               |---
-| `show vrf`                        | `ip link show type vrf`          | Display the VRF's configured
-| `show vrf <vrfname> brief`        | `ip -br link show type vrf`      | Display VRF brief info
-| `show vrf <vrfname> detail`       | `ip -d link show type vrf`       | Displays VRF detailed info
-| `show vrf route`                  | `ip route show`                  | Displays the default VRF routes
-| `show vrf route table <table-id>` | `ip route show table <table-id>` | Displays the VRF routes for table-id
-| `show vrf address <vrfname>`      | `ip address show vrf <vrfname>`  | Displays IP related info for VRF
+| SONiC wrapper command             | Linux command                             | Description
+|---                                |---                                        |---
+| `show mgmt-vrf`                   | `ip netns show`                           | Read & display management VRF configuration
+| `show mgmt-vrf interfaces `       | `ip netns exec management ifconfig'       | Displays VRF detailed info
+| `show mgmt-vrf route`             | `ip netns exec management ip route show`  | Displays the default VRF routes
+| `show vrf address <vrfname>`      | `ip netns exec management ip address show'| Displays IP related info for VRF
 
 ### IP Application Design
 This section explains the behavior of each application on the default VRF and management VRF. Application functionality differs based on whether the application is used to connect to the application daemons running in the device or the application is triggered from the device.
@@ -213,7 +208,6 @@ All reply packets from application daemons use the conntrack entries to do the r
 #### Applications Originating From the Device
 Applications originating from the device need to know the VRF in which it has to run. "ping", "traceroute","dhcclient", "apt-get", "curl" & "ssh" can be executed in management namespace using "ip netns exec management <command_to_execute>", hence these applications continue to work on both management and default VRF's without any change. Applications like TACACS & DNS are used by other applications using the POSIX APIs provided by them. Additional iptables rules need to be added (as explained in following sub-sections) to make them work through the management VRF. 
 
-HARISH_TO_CHECK: I think that dhclient has to be executed even before management namespace is created. Or, should we execute them using "ip netns exec"? Change the above paragraph accordingly.
 
 ##### TACACS Implementation
 TACACS is a library function that is used by applications like SSHD to authenticate the users. When users connect to the device using SSH and if the "aaa" authentication is configured to use the tacacs+, it is expected that device shall connect to the tacacs+ server via management VRF (or default VRF) and authenticate the user. TACACS implementation contains two sub-modules, viz, NSS and PAM. These module code is enhanced to support an additional parameter "--use-mgmt-vrf" while configuring the tacacs+ server IP address. When user specifies the --use-mgmt-vrf as part of "config tacacs add --use-mgmt-vrf <tacacs_server_ip>" command, this is passed as an additional parameter to the config_db's TACPLUS_SERVER tag. This additional parameter is read using the script files/image_config/hostcfgd. This script is enhanced to add/delete the following rules as and when the tacacs server IP address is added or deleted.
@@ -252,11 +246,9 @@ Following diagram explains the internal packet flow for the tacacs packets that 
 #### SNMP
 The net-snmp daemon runs on the default namespace. SNMP request packets coming from FPP are directly handed over using default namespace. SNMP requests from management interfaces are routed to default namespace using the DNAT & SNAT (and conntrack entries for reply packets) similar to other applications like SSH.
 W.r.t. SNMP traps originated from the device, the design similar to tacacs will be implemented to route them through management namespace.
-HARISH_TO_CHECK: Update this.
  
 #### DHCP Client 
-DHCP client gets the IP address for the management ports from the DHCP server, since it is enabled on a per interface the IP address is received automatically. DHCP Client has an additional option now to get the mgmt_vrf_config.sh script from the DHCP server. This script will be run as apart of the dhcp exit hooks and will configure management VRF when the system boots or dhclient command is issued. The script will also write the vrfname and eth0 ip to config_db.json and load it to be saved to ConfigDb. Applications requiring the MGMT interface configs can be retrived from ConfigDb. The default route that is being added to the default VRF needs to be removed. If the new option in dhclient.conf is not there the system behaves in normal mode.
-HARISH_TO_CHECK: Need to decide on when the DHCP happens during reboot. Will the management namespace be available before the DHCP is successful?
+DHCP client is triggered internally as part of restarting the networking service. When management VRF is enabled and if the user has not configured a static IP address for the interface, the script "/etc/if-up.d/netns" takes care of executing "ip netns exec management ifup -i /etc/network/interfaces.management" that triggers the DHCP in the management namespace context. 
 
 #### DHCP Relay 
 DHCP relay is expected to work via the default VRF. DHCP Relay shall receive the DHCP requests from servers via the front-panel ports and it will send it to DHCP server through front-panel ports. No changes are reqiured.
