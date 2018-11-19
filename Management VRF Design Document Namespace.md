@@ -168,6 +168,7 @@ This section describes the default behavior and configuration of management VRF 
 This command configures the tag "MANAGEMENT_VRF_CONFIG" in the ConfigDB (given below) and it restarts the "interfaces-config" service. The existing jinja template file "interfaces.j2" is enhanced to check this configuration and create the /etc/network/interfaces file with or without the "eth0" in the configuration. When management VRF is enabled, it does not add the "eth0" interface in this /etc/network/interfaces file. Instead, the service uses a new jinja template file "interfaces_mgmt.j2" and creates a new VRF specific configuration file /etc/network/interfaces.management.
 This solution is based on the netns solution proposed at https://github.com/m0kct/debian-netns 
 As specified in the solution, additional scripts are added, viz,  "/etc/network/if-pre-up.d/netns", "/etc/network/if-up.d/netns" and "/etc/network/if-down.d/netns. These scripts use the configuration files and follows the sequence of steps explained in the design section that takes care of the following.
+
     1. Creates the management namespace using command C1
     2. Attaches eth0 to the management namespace using command C2
     3. Configures IP address for eth0 in management namespace and adds the default route in management namespace using commands C3 & C4. This happens only when user had already configured the eth0 IP address and default gateway address using the MGMT_INTERFACE configuration. If this is not configured, it defaults to "dhcp".
@@ -175,6 +176,7 @@ As specified in the solution, additional scripts are added, viz,  "/etc/network/
     5. Configures IP addresses for if1 and if2 using commands C8 & C9 
     6. Adds iptables DNAT & SNAT rules as given in C10, C11, C12, C13 & C16. 
     7. As part of DNAT rules, port numbers corresponding to the application deamons SSH, FTP, HTTP, HTTPS, SNMP, TFTP are added to accept packets from those applications. If any other application port number should be accepted in management interface, correponding DNAT rule should be added using the command C12 in linux shell.
+    
 
 #### ConfigDB Schema
 The upgraded config_db.json schema to store the flag for enabling/disabling management VRF is as follows. Default value is set to false (by default management VRF is disabled). Users can enable it using the "config vrf enable-mgmt-vrf" command as explained above.
