@@ -1,9 +1,10 @@
 # Management VRF Design Document
 
 ## Introduction
-Management VRF is a subset of Virtual Routing and Forwarding, and provides a separation between the management network traffic and the data plane network traffic. For all VRFs the main routing table is the default table for all data plane ports. With management VRF a second routing table, mgmt, is used for routing through the management ethernet ports of the switch. 
+Management VRF is a subset of Virtual Routing and Forwarding (VRF), and provides a separation between the management network traffic and the data plane network traffic. For all VRFs the main routing table is the default table for all data plane ports. With management VRF a second routing table "management", is used for routing through the management ethernet ports of the switch. 
 
-The following design for Management VRF leverages Linux Stretch kernel(4.9) Namespace concept for implementing management VRF on SONiC; refer to [design comparison](#design_comparison) for trade-offs of that approach vs. l3mdev-based design.  
+The following design for Management VRF leverages Linux Stretch kernel(4.9) Namespace concept for implementing management VRF on SONiC; refer to [design comparison](#design_comparison) for trade-offs of that approach vs. l3mdev-based design. 
+Note that the document uses the words VRF and Namespace interchangeably, both meaning the VRF.
  
 ## Requirements
 | Req. No | Description                                                                                                | Priority | Comments |
@@ -12,17 +13,17 @@ The following design for Management VRF leverages Linux Stretch kernel(4.9) Name
 | 2       | Management VRF should be associated with a separate L3 Routing table and the management interface
 | 3       | Management VRF and Default VRF should support IP services like `ping` and `traceroute` in its context
 | 4       | Management VRF should provide the ability to be polled via SNMP both via Default VRF and Management VRF
-| 5       | Management VRF will provide the ability to send SNMP traps both via the Management VRF and Data Network
-| 7       | Dhcp Relay  - Required on Default VRF support
+| 5       | Management VRF will provide the ability to send SNMP traps both via the Management VRF and Default VRF
+| 7       | Dhcp Relay  - Required on Default VRF
 | 8       | Dhcp Client - Required on both default VRF and management VRF
-| 9       | Enable SSH services to run in the Management VRF context and Default VRF context
-| 10      | Enable TFTP services to run in the Management VRF context and Default VRF context
-| 11      | Management VRF should support NTP services in its context
-| 12      | Management VRF and Default VRF should support `wget`, `cURL` and HTTPS services
-| 13      | Management VRF should support `apt-get` package managers in the Management VRF context
-| 14      | Management VRF will provide TACACS+ support
+| 9       | SSH services should work in both the Management VRF context and Default VRF context
+| 10      | TFTP services should work in both the Management VRF context and Default VRF context
+| 11      | NTP service should work in Management VRF context.
+| 12      | `wget`, `cURL` and HTTPS services should work in both Management VRF context and Default VRF context.
+| 13      | `apt-get` package managers should be supported in Management VRF context.
+| 14      | TACACS+ should be supported in Management VRF.
 
-The Scope of this design document is only limited to management VRF. 
+The Scope of this design document is only limited to management VRF. "eth0" is the only port that is part of management VRF; Front Panel Ports (shortly called FPP) are not part of management VRF; design can be extended in future if required.
 
 ## Design
 Namespaces are a feature of the Linux kernel that partitions kernel resources such that one set of processes sees one set of resources while another set of processes sees a different set of resources. 
@@ -47,7 +48,7 @@ In order to make the applications to work in both management VRF and in default 
 
 ![VethPair](Management%20VRF%20Design%20Document%20NS%20VethPair.svg) 
 
-Two new internal interfaces "if1" and "if2" are created and they are attached to the veth pair as peers. "if1" is attached to management NS and "if2" is attached to default NS. Internal IP addresses "iip1" and "iip2" are confgiured to them for internal communication. Following linux commands are internally used for creating the same.
+Two new internal interfaces "if1" and "if2" are created and they are attached to the veth pair as peers. "if1" is attached to management NS and "if2" is attached to default NS. Internal IP addresses "iip1" and "iip2" are confgiured to them for internal communication. The internal IP address fr iip1 & iip2 are set to 192.168.1.1 & 192.168.1.2 as an example; it can be changed to 127.100.100.1 & 127.100.100.2 (or any other IP address) if there is no conflicting applications using the 127 Network. Following linux commands are internally used for creating the same.
 
     C5: Create if2 & have it in veth pair with peer interface as if1
         ip link add name if2 type veth peer name if1
@@ -78,7 +79,7 @@ Following diagram explains the internal packet flow for the packets that arrive 
 ![Incoming Packet Flow](Management%20VRF%20Design%20Document%20NS%20FPP%20Incoming%20Pkt.svg) 
 
 **Step1:** 
-For all packets arriving on management interface, change the destination IP address to "iip2" and route it. This is achieved by creating a new iptables chain "MgmtVrfChain", linking all incoming packets to this chain lookup and then doing DNAT to change the destination IP as given in the following example.
+For all packets arriving on management interface, change the destination IP address to "iip2" and route it. This is achieved by creating a new iptables chain "MgmtVrfChain", linking all incoming packets to this chain lookup and then doing DNAT to change the destination IP as given in the following example. Similarly, add rules for each application destination port numbers (SSH, SNMP, FTP, HTTP, NTP, TFTP, NetConf) as required. Rule C12 is just an example for SSH port 22.
 
     C10: Create the Chain "MgmtVrfChain": 
          ip netns exec management iptables -t nat -N MgmtVrfChain
@@ -89,19 +90,19 @@ For all packets arriving on management interface, change the destination IP addr
     C12: Create DNAT rule to change destination IP to iip2 (ex: for SSH packets with destination port 22): 
          ip netns exec management iptables -t nat -A MgmtVrfChain -p tcp --dport 22 -j DNAT --to-destination 192.168.1.2   
 
-Similarly, add rules for each application destination port numbers (SSH, SNMP, FTP, HTTP, NTP, TFTP, NetConf) as required. Once if the destination IP is changed to iip2, management namespace routing instance will take of routing these packets via the outport iif1. Original destination IP will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets.
-When user wants to run any new application, a new rule with the appropriate dport should be added.
+Using these rules, the destination IP is changed to iip2 before it is routed by management namespace. Management VRF routing instance routes these packets via the outport iif1. Original destination IP will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. 
+When user wants to run any new application, a new rule with the appropriate dport should be added similar to the SSH dport 22 used in the above example C12.
 
-Alternatively, if all packets arriving in management interface can be handed over to the applications running in default NS without validating the destination port, a default rule for all application port numbers can be added in this rule (by ommitting the --dport) instead of application specific rule. 
+Alternatively, if all packets arriving in management interface can be handed over to the applications running in default NS without validating the destination port, a default rule for all application port numbers can be added in this rule (by ommitting the --dport) instead of application specific rule. In the current solution without management VRF, SONiC accepts all packets for all application port numbers without any specific ACL rules. In case if the same behaviour is acceptable in management VRF solution also, this rule can be used. In general, it is better to restrict the incoming packets by adding rules only for the port numbers for the applications that are supported in SONiC.
 This design point should be reviewed and a decision has to be taken.
 
 **Step2:** 
 After routing, use POST routing SNAT rule to change the source IP address to iip1 as given in the following example.
 
     C13: Add a post routing SNAT rule to change Source IP address:
-         ip netns exec management iptables -t nat -A POSTROUTING -o if1 -j SNAT --to-source 192.168.1.1
+         ip netns exec management iptables -t nat -A POSTROUTING -o if1 -j SNAT --to-source 192.168.1.1:62000-65000
 
-This rule does source NAT for all packets that are routed through iif1 and changes the source IP to iip1. Original source IP will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. Once if the source IP is changed to iip2, packets are sent out of iif1, which are received in iif2 by the default namespace. All those packets will be routed using the default routing instance. These packets with destination IP iip2 are self destined packets and hence they will be handed over to the appropriate application deamons running in the default namespace.
+This rule does source NAT for all packets that are routed through iif1 and changes the source IP to iip1. It also uses the port translation which is required to handle the usage of same source port number by two different external sources. Original source IP & port will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. Once if the source IP  & source port are changed to iip2 and port number between 62000 and 65000, packets are sent out of iif1, which are received in iif2 by the default namespace. All those packets will be routed using the default routing instance. These packets with destination IP iip2 are self destined packets and hence they will be handed over to the appropriate application deamons running in the default namespace.
 
 
 ### OUTGOING PACKET ROUTING
@@ -122,7 +123,7 @@ This command will be executed in the management namespace (VRF) context and henc
 This sub-section explains the flow for internal applications like DNS, TACACS, SNMP trap, that are used by the application daemons like SSH (uses TACACS), Ping (uses DNS), SNMPD (sends traps). Daemons use the internal POSIX APIs of internal applications to generate the packets. If such packets need to travel via the management namespace, user should configure "--use-mgmt-vrf" as part of the server  address configuration.
 Such application modules are using the following DNAT & SNAT iptables rules to route the packets from default VRF context to the management VRF context and then to send it out of management interface. Application specific design enhancement is explained in the appropriate sub-sections.
 
-   1) Destination IP address of packet is changed to "iip1". This results in default VRF routing instance to send all those packets to veth pair, which results in reaching management namespace.
+   1) Destination IP address of packet is changed to "iip1". This results in default VRF routing instance to send all those packets to veth pair, which results in reaching management namespace. This is an example for tacacs that uses the port number 62000 for the tacacs server, which is explained in detail in tacacs implementation section.
 
     C15: Create DNAT rule for tacacs server IP address
          ip netns exec management iptables -t nat -A PREROUTING -i if1 -p tcp --dport 62000 -j DNAT --to-destination <actual_tacacs_server_ip>:<dport_of_tacacs_server>
@@ -306,3 +307,18 @@ But, the 4.9 kernel does not support accepting UDP packets in both management VR
 ### Default Routing Table For Management Traffic
 This option is based on non-standard way of visualizing the routing table. By default, all data traffic are handled via "default routing table". But, this is not mandatory. Instead, create a "blue VRF" and associate all front-panel ports to "blue VRF" and management port (eth0) is associated to default VRF. The "default VRF routing table" is "management VRF routing table" and "blue VRF routing table" as the "data routing table". This is a perception change. All the device originated applications (like DNS, apt-get) operating via management network need not be modified. They will continue to use default routing table (i.e., management VRF routing table) and send traffic via management port. Applications like Ping, Traceroute and DHCP client already operates on per-interface basis. This is not prototyped and hence there is no proof that applications can work without any change. Lastly none of the industry use this kind of perception change and hence this design option is dropped.
 
+### Alternate Solution Options for Bootup Sequence
+There are multiple ways in which the management namespace can be created in SONiC. The chosen solution explained in Design section is based on the solution provided at https://github.com/m0kct/debian-netns 
+Following alternate solutions were also considered and dropped due to the reasons given below.
+
+**Option1: Use only /etc/network/interfaces**
+Understand the current SONiC (Debian) control flow on how the restarting of networking service uses the /etc/network/interfaces and find out how the IP address is configured for the interfaces and how the ifup/ifdown is being called. Find out where the linux commands are called/used and change them to use  “ip netns exec management” in such places based on the namespace to which the interface belongs to. For example, use "ip netns exec" for eth0 specific operations and dont use the same for interfaces that belong to default VRF. Linux configuration always happens in the default VRF context using the debian package “ifupdown”; this code flow will result in modifying this debian package. Instead, since there is an alternate solution without changing debian package, this option is dropped.
+
+**Option2: Avoid the usage of /etc/network/interfaces**
+This option is to use “ip netns exec” linux calls instead of following the networking service restart flow. i.e. Modify the existing SONiC control flow and avoid the usage of /etc/network/interfaces and "ifupdown" package to configure the interfaces. Solution is to modify the bootup sequence script “interfaces_config.sh” and make the direct linux shell commands to configure the management VRF and the required DNAT & SNAT rules. Comment out the "systemctl restart networking" so that the control flow that uses the /etc/network/interfaces is avoided. This means that  the existing SONiC solution that is based on /etc/network/interfacecs and networking restart is not used. 
+**Disadvantages:** 
+
+1. Current SONiC solution that uses the /etc/network/interfaces and networking restart will be deviating, which is not required in other options
+2. If user explicitly executes the "systemctl restart networking" command directly from linux shell, the  VRF configuration will be lost. This needs further investigation on solving all such cases. 
+
+Due to the reasons given above, the solution given at https://github.com/m0kct/debian-netns is chosen and explained earlier in design section.
