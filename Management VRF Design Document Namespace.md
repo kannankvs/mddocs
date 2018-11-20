@@ -91,10 +91,7 @@ For all packets arriving on management interface, change the destination IP addr
          ip netns exec management iptables -t nat -A MgmtVrfChain -p tcp --dport 22 -j DNAT --to-destination 192.168.1.2   
 
 Using these rules, the destination IP is changed to iip2 before it is routed by management namespace. Management VRF routing instance routes these packets via the outport iif1. Original destination IP will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. 
-When user wants to run any new application, a new rule with the appropriate dport should be added similar to the SSH dport 22 used in the above example C12.
-
-Alternatively, if all packets arriving in management interface can be handed over to the applications running in default NS without validating the destination port, a default rule for all application port numbers can be added in this rule (by ommitting the --dport) instead of application specific rule. In the current solution without management VRF, SONiC accepts all packets for all application port numbers without any specific ACL rules. In case if the same behaviour is acceptable in management VRF solution also, this rule can be used. In general, it is better to restrict the incoming packets by adding rules only for the port numbers for the applications that are supported in SONiC.
-This design point should be reviewed and a decision has to be taken.
+When user wants to run any new application, a new rule with the appropriate dport should be added similar to the SSH dport 22 used in the above example C12. This solution of adding application specific dport rule is to restrict and accept only the incoming packets for the applications that are supported in SONiC.
 
 **Step2:** 
 After routing, use POST routing SNAT rule to change the source IP address to iip1 as given in the following example.
@@ -102,7 +99,7 @@ After routing, use POST routing SNAT rule to change the source IP address to iip
     C13: Add a post routing SNAT rule to change Source IP address:
          ip netns exec management iptables -t nat -A POSTROUTING -o if1 -j SNAT --to-source 192.168.1.1:62000-65000
 
-This rule does source NAT for all packets that are routed through iif1 and changes the source IP to iip1. It also uses the port translation which is required to handle the usage of same source port number by two different external sources. Original source IP & port will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. Once if the source IP  & source port are changed to iip2 and port number between 62000 and 65000, packets are sent out of iif1, which are received in iif2 by the default namespace. All those packets will be routed using the default routing instance. These packets with destination IP iip2 are self destined packets and hence they will be handed over to the appropriate application deamons running in the default namespace.
+This rule does source NAT for all packets that are routed through if1 and changes the source IP to iip1 and source port to a port number between 62000 and 65000. This source port translation is required to handle the usage of same source port number by two different external sources. Original source IP & port will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. After changing the source IP  & source port, packets are sent out of iif1 and received in iif2 by the default namespace. All packets are then routed using the default routing instance. These packets with destination IP iip2 are self destined packets and hence they will be handed over to the appropriate application deamons running in the default namespace.
 
 
 ### OUTGOING PACKET ROUTING
@@ -120,15 +117,15 @@ This command will be executed in the management namespace (VRF) context and henc
 
 **Applications triggered internally:**
 
-This sub-section explains the flow for internal applications like DNS, TACACS, SNMP trap, that are used by the application daemons like SSH (uses TACACS), Ping (uses DNS), SNMPD (sends traps). Daemons use the internal POSIX APIs of internal applications to generate the packets. If such packets need to travel via the management namespace, user should configure "--use-mgmt-vrf" as part of the server  address configuration.
-Such application modules are using the following DNAT & SNAT iptables rules to route the packets from default VRF context to the management VRF context and then to send it out of management interface. Application specific design enhancement is explained in the appropriate sub-sections.
+This section explains the flow for internal applications like DNS, TACACS, SNMP trap, that are used by the application daemons like SSH (uses TACACS), Ping (uses DNS), SNMPD (sends traps). Daemons use the internal POSIX APIs of internal applications to generate the packets. If such packets need to travel via the management namespace, user should configure "--use-mgmt-vrf" as part of the server  address configuration.
+These application modules use the following DNAT & SNAT iptables rules to send the packets from default VRF context to the management VRF context and to route them through management namespace via management interface. Application specific design enhancement is explained below in the appropriate sections.
 
-   1) Destination IP address of packet is changed to "iip1". This results in default VRF routing instance to send all those packets to veth pair, which results in reaching management namespace. This is an example for tacacs that uses the port number 62000 for the tacacs server, which is explained in detail in tacacs implementation section.
+   1) Destination IP address of packet is changed to "iip1". This results in default VRF routing instance to send all the packets to veth pair, resulting in reaching management namespace. This is an example for tacacs that uses the port number 62000 for the tacacs server, which is explained in detail in tacacs implementation section.
 
     C15: Create DNAT rule for tacacs server IP address
          ip netns exec management iptables -t nat -A PREROUTING -i if1 -p tcp --dport 62000 -j DNAT --to-destination <actual_tacacs_server_ip>:<dport_of_tacacs_server>
 
-   2) Destination port number of packet is changed to an internal port number. This will be used by management namespace for finding the appropriate DNAT rule in its iptables that is requried to identify the actual destiation IP to which the packet has to be sent.
+   2) Destination port number of packet is changed to an internal port number. This will be used by management namespace for finding the appropriate DNAT rule in management VRF iptables that is requried to identify the actual destiation IP to which the packet has to be sent.
 
     C16: Create SNAT rule for source IP masquerade
          ip netns exec management iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
@@ -185,10 +182,10 @@ Following show commands need to be implemented to display the VRF configuration.
 | `show vrf address <vrfname>`      | `ip netns exec management ip address show'| Displays IP related info for VRF
 
 ### IP Application Design
-This section explains the behavior of each application on the default VRF and management VRF. Application functionality differs based on whether the application is used to connect to the application daemons running in the device or the application is triggered from the device.
+This section explains the behavior of each application on the default VRF and management VRF. Application functionality differs based on whether the application is used to connect to the application daemons running in the device or the application is originating from the device.
 
 #### Application Daemons In The Device
-All application daemons run in the default namespace. All packets arriving in FPP are handled by default namespace as it is.
+All application daemons run in the default namespace. All packets arriving in FPP are handled by default namespace.
 All packets arriving in the management ports will be routed to the default VRF using the prerouting DNAT rule and post routing SNAT rule. Appropriate conntract entries will be created.
 All reply packets from application daemons use the conntrack entries to do the reverse routing from default namespace to management namespace and then routing through the management port eth0.
 
