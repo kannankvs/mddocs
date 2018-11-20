@@ -45,23 +45,7 @@ For example, IP address for the management port eth0 is assigned using the comma
 All processes (application daemons) are running in the default namespace context.
 In order to make the applications to work in both management VRF and in default VRF, these applications use the following "veth pair" solution. The veth devices are virtual Ethernet devices that act as tunnels between network namespaces to create a bridge to a physical network device in another namespace. 
 
-                ---------------------------------------------------------
-                |                      LINUX                            |
-                |                                                       |
-         FPP    |     ------------------           -----------------    |
-         -------|-----|                |           |               |    |
-         -------|-----|    Default     |           |  Management   |    |
-         -------|-----|      NS        |           |     NS        |----|---- eth0
-         -------|-----|                |           |               |    |
-         -------|-----|                |           |               |    |
-                |     ------------------           -----------------    |
-                |              if2 |                    | if1           |
-                |             iip2 |                    | iip1          |
-                |                -------------------------              |
-                |                |     veth pair         |              |
-                |                |                       |              |
-                |                -------------------------              |
-                ---------------------------------------------------------
+![VethPair](Management%20VRF%20Design%20Document%20NS%20VethPair.svg) 
 
 Two new internal interfaces "if1" and "if2" are created and they are attached to the veth pair as peers. "if1" is attached to management NS and "if2" is attached to default NS. Internal IP addresses "iip1" and "iip2" are confgiured to them for internal communication. Following linux commands are internally used for creating the same.
 
