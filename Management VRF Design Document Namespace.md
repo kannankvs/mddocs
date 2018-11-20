@@ -229,7 +229,7 @@ When the packet egress out of eth0, POSTROUTING maseuerade rule will be applied 
 With these rules, tacacs packet is then routed by the management namespace through the management interface eth0. While routing the packet, appropraite conntract entries are created by linux, which in turn will be used for doing the reverse NAT for the reply packets arriving from the tacacs server.
 Following diagram explains the internal packet flow for the tacacs packets that are expected to be sent out of management interface.
 
-![Outgoing_Packet_Flow](Management%20VRF%20Design%20Document%20NS%20Eth0%20Outgoing%20Pk.svg) 
+![Outgoing_Packet_Flow](Management%20VRF%20Design%20Document%20NS%20Eth0%20Outgoing%20Pkt.svg) 
 
 #### SNMP
 The net-snmp daemon runs on the default namespace. SNMP request packets coming from FPP are directly handed over using default namespace. SNMP requests from management interfaces are routed to default namespace using the DNAT & SNAT (and conntrack entries for reply packets) similar to other applications like SSH.
