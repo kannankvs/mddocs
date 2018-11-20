@@ -73,10 +73,10 @@ Packets arriving via the front panel ports are routed using the default routing 
 Packets arriving on management interface need the following NAT based design. By default, such packets are routed using the linux stack running in management NS which is unaware of the applications running in default NS. DNAT & SNAT rules are used for internally routing the packets between the management NS and default NS and viceversa. Default iptables rules shall be added in the management NS in order to route those packets to internal IP of default VRF "iip2".
 
 Following diagram explains the internal packet flow for the packets that arrive in management interface eth0.
-![Incoming Packet Flow](Management%20VRF%20Design%20Document%20NS%20Eth0%20Incoming%20Pkt.svg) 
+![Eth0 Incoming Packet Flow](Management%20VRF%20Design%20Document%20NS%20Eth0%20Incoming%20Pkt.svg) 
 
 Following diagram explains the internal packet flow for the packets that arrive in Front Panel Ports (FPP).
-![Incoming Packet Flow](Management%20VRF%20Design%20Document%20NS%20FPP%20Incoming%20Pkt.svg) 
+![FPP Incoming Packet Flow](Management%20VRF%20Design%20Document%20NS%20FPP%20Incoming%20Pkt.svg) 
 
 **Step1:** 
 For all packets arriving on management interface, change the destination IP address to "iip2" and route it. This is achieved by creating a new iptables chain "MgmtVrfChain", linking all incoming packets to this chain lookup and then doing DNAT to change the destination IP as given in the following example. Similarly, add rules for each application destination port numbers (SSH, SNMP, FTP, HTTP, NTP, TFTP, NetConf) as required. Rule C12 is just an example for SSH port 22.
@@ -228,7 +228,7 @@ When the packet egress out of eth0, POSTROUTING maseuerade rule will be applied 
 
 With these rules, tacacs packet is then routed by the management namespace through the management interface eth0. While routing the packet, appropraite conntract entries are created by linux, which in turn will be used for doing the reverse NAT for the reply packets arriving from the tacacs server.
 Following diagram explains the internal packet flow for the tacacs packets that are expected to be sent out of management interface.
-![Incoming Packet Flow](Management%20VRF%20Design%20Document%20NS%20FPP%20IOutgoing%20Pkt.svg) 
+![Outgoing Packet Flow](Management%20VRF%20Design%20Document%20NS%20Eth0%20IOutgoing%20Pkt.svg) 
 
 #### SNMP
 The net-snmp daemon runs on the default namespace. SNMP request packets coming from FPP are directly handed over using default namespace. SNMP requests from management interfaces are routed to default namespace using the DNAT & SNAT (and conntrack entries for reply packets) similar to other applications like SSH.
