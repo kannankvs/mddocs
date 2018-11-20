@@ -44,7 +44,7 @@ For example, IP address for the management port eth0 is assigned using the comma
      C4: ip netns exec management ip route add default via <def_gw_ip_addr>
 
 All processes (application daemons) are running in the default namespace context.
-In order to make the applications to work in both management VRF and in default VRF, these applications use the following "veth pair" solution. The veth devices are virtual Ethernet devices that act as tunnels between network namespaces to create a bridge to a physical network device in another namespace. 
+In order to make the applications to work in both management VRF and in default VRF, these applications use the following "veth pair" solution. The veth devices are virtual Ethernet devices that act as tunnels between network namespaces to create a bridge to a physical network device in another namespace. Logical representation of the default VRF, management VRF and the way they talk to each other using veth pair is shown in the following diagram.
 
 ![VethPair](Management%20VRF%20Design%20Document%20NS%20VethPair.svg) 
 
