@@ -46,7 +46,7 @@ For example, IP address for the management port eth0 is assigned using the comma
 All processes (application daemons) are running in the default namespace context.
 In order to make the applications to work in both management VRF and in default VRF, these applications use the following "veth pair" solution. The veth devices are virtual Ethernet devices that act as tunnels between network namespaces to create a bridge to a physical network device in another namespace. Logical representation of the default VRF, management VRF and the way they talk to each other using veth pair is shown in the following diagram.
 
-![VethPair](Management%20VRF%20Design%20Document%20NS%20VethPair.svg) 
+![VethPair](Management%20VRF%20Design%20Document%20NS%20VethPair.svg "VRF Representation with Veth Pair") 
 
 Two new internal interfaces "if1" and "if2" are created and they are attached to the veth pair as peers. "if1" is attached to management NS and "if2" is attached to default NS. Internal IP addresses "iip1" and "iip2" are confgiured to them for internal communication. The internal IP address fr iip1 & iip2 are set to 192.168.1.1 & 192.168.1.2 as an example; it can be changed to 127.100.100.1 & 127.100.100.2 (or any other IP address) if there is no conflicting applications using the 127 Network. Following linux commands are internally used for creating the same.
 
@@ -73,10 +73,10 @@ Packets arriving via the front panel ports are routed using the default routing 
 Packets arriving on management interface need the following NAT based design. By default, such packets are routed using the linux stack running in management NS which is unaware of the applications running in default NS. DNAT & SNAT rules are used for internally routing the packets between the management NS and default NS and viceversa. Default iptables rules shall be added in the management NS in order to route those packets to internal IP of default VRF "iip2".
 
 Following diagram explains the internal packet flow for the packets that arrive in management interface eth0.
-![Eth0 Incoming Packet Flow](Management%20VRF%20Design%20Document%20NS%20Eth0%20Incoming%20Pkt.svg) 
+![Eth0 Incoming Packet Flow](Management%20VRF%20Design%20Document%20NS%20Eth0%20Incoming%20Pkt.svg "Eth0 Incoming Packets Control Flow") 
 
 Following diagram explains the internal packet flow for the packets that arrive in Front Panel Ports (FPP).
-![FPP Incoming Packet Flow](Management%20VRF%20Design%20Document%20NS%20FPP%20Incoming%20Pkt.svg) 
+![FPP Incoming Packet Flow](Management%20VRF%20Design%20Document%20NS%20FPP%20Incoming%20Pkt.svg "Front Panel Ports Incoming Packets Control Flow") 
 
 **Step1:** 
 For all packets arriving on management interface, change the destination IP address to "iip2" and route it. This is achieved by creating a new iptables chain "MgmtVrfChain", linking all incoming packets to this chain lookup and then doing DNAT to change the destination IP as given in the following example. Similarly, add rules for each application destination port numbers (SSH, SNMP, FTP, HTTP, NTP, TFTP, NetConf) as required. Rule C12 is just an example for SSH port 22.
@@ -229,7 +229,7 @@ When the packet egress out of eth0, POSTROUTING maseuerade rule will be applied 
 With these rules, tacacs packet is then routed by the management namespace through the management interface eth0. While routing the packet, appropraite conntract entries are created by linux, which in turn will be used for doing the reverse NAT for the reply packets arriving from the tacacs server.
 Following diagram explains the internal packet flow for the tacacs packets that are expected to be sent out of management interface.
 
-![Outgoing_Packet_Flow](Management%20VRF%20Design%20Document%20NS%20Eth0%20Outgoing%20Pkt.svg) 
+![Outgoing_Packet_Flow](Management%20VRF%20Design%20Document%20NS%20Eth0%20Outgoing%20Pkt.svg "TACACS+ Outgoing Packets Control Flow") 
 
 #### SNMP
 The net-snmp daemon runs on the default namespace. SNMP request packets coming from FPP are directly handed over using default namespace. SNMP requests from management interfaces are routed to default namespace using the DNAT & SNAT (and conntrack entries for reply packets) similar to other applications like SSH.
