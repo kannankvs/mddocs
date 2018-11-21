@@ -59,17 +59,17 @@ Two new internal interfaces "if1" and "if2" are created and they are attached to
         ip link set dev if1 netns management
 
     C8: Configure an internal IP address for if1 that is part of management namespace
-        ip netns exec management ifconfig if1 192.168.1.1/24
+        ip netns exec management ifconfig if1 127.100.100.1/24
 
     C9: Configure an internal IP address for if2
-        ifconfig if2 192.168.1.2/24
+        ifconfig if2 127.100.100.2/24
 
 
 
 ### INCOMING PACKET ROUTING
 
 Packets arriving via the front panel ports are routed using the default routing table as part of default NS and hence they work normally without any design change.
-Packets arriving on management interface need the following NAT based design. By default, such packets are routed using the linux stack running in management NS which is unaware of the applications running in default NS. DNAT & SNAT rules are used for internally routing the packets between the management NS and default NS and viceversa. Default iptables rules shall be added in the management NS in order to route those packets to internal IP of default VRF "iip2".
+Packets arriving on management interface need the following NAT based design. By default, such packets are routed using the linux stack running in management NS which is unaware of the applications running in default NS. DNAT & SNAT rules are used for internally routing the packets between the management NS and default NS and viceversa. Default iptables rules shall be added in the management NS in order to route those packets to internal IP of default VRF "ip_address2".
 
 Following diagram explains the internal packet flow for the packets that arrive in management interface eth0.
 ![Eth0 Incoming Packet Flow](Management%20VRF%20Design%20Document%20NS%20Eth0%20Incoming%20Pkt.svg "Eth0 Incoming Packets Control Flow") 
@@ -78,7 +78,7 @@ Following diagram explains the internal packet flow for the packets that arrive 
 ![FPP Incoming Packet Flow](Management%20VRF%20Design%20Document%20NS%20FPP%20Incoming%20Pkt.svg "Front Panel Ports Incoming Packets Control Flow") 
 
 **Step1:** 
-For all packets arriving on management interface, change the destination IP address to "iip2" and route it. This is achieved by creating a new iptables chain "MgmtVrfChain", linking all incoming packets to this chain lookup and then doing DNAT to change the destination IP as given in the following example. Similarly, add rules for each application destination port numbers (SSH, SNMP, FTP, HTTP, NTP, TFTP, NetConf) as required. Rule C12 is just an example for SSH port 22.
+For all packets arriving on management interface, change the destination IP address to "ip_address2" and route it. This is achieved by creating a new iptables chain "MgmtVrfChain", linking all incoming packets to this chain lookup and then doing DNAT to change the destination IP as given in the following example. Similarly, add rules for each application destination port numbers (SSH, SNMP, FTP, HTTP, NTP, TFTP, NetConf) as required. Rule C12 is just an example for SSH port 22.
 
     C10: Create the Chain "MgmtVrfChain": 
          ip netns exec management iptables -t nat -N MgmtVrfChain
@@ -86,19 +86,19 @@ For all packets arriving on management interface, change the destination IP addr
     C11: Link all incoming packets to the chain lookup: 
          ip netns exec management iptables -t nat -A PREROUTING -i eth0 -j MgmtVrfChain
 
-    C12: Create DNAT rule to change destination IP to iip2 (ex: for SSH packets with destination port 22): 
-         ip netns exec management iptables -t nat -A MgmtVrfChain -p tcp --dport 22 -j DNAT --to-destination 192.168.1.2   
+    C12: Create DNAT rule to change destination IP to ip_address2 (ex: for SSH packets with destination port 22): 
+         ip netns exec management iptables -t nat -A MgmtVrfChain -p tcp --dport 22 -j DNAT --to-destination 127.100.100.2   
 
-Using these rules, the destination IP is changed to iip2 before it is routed by management namespace. Management VRF routing instance routes these packets via the outport iif1. Original destination IP will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. 
+Using these rules, the destination IP is changed to ip_address2 before it is routed by management namespace. Management VRF routing instance routes these packets via the outport iif1. Original destination IP will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. 
 When user wants to run any new application, a new rule with the appropriate dport should be added similar to the SSH dport 22 used in the above example C12. This solution of adding application specific dport rule is to restrict and accept only the incoming packets for the applications that are supported in SONiC.
 
 **Step2:** 
-After routing, use POST routing SNAT rule to change the source IP address to iip1 as given in the following example.
+After routing, use POST routing SNAT rule to change the source IP address to ip_address1 as given in the following example.
 
     C13: Add a post routing SNAT rule to change Source IP address:
-         ip netns exec management iptables -t nat -A POSTROUTING -o if1 -j SNAT --to-source 192.168.1.1:62000-65000
+         ip netns exec management iptables -t nat -A POSTROUTING -o if1 -j SNAT --to-source 127.100.100.1:62000-65000
 
-This rule does source NAT for all packets that are routed through if1 and changes the source IP to iip1 and source port to a port number between 62000 and 65000. This source port translation is required to handle the usage of same source port number by two different external sources. Original source IP & port will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. After changing the source IP  & source port, packets are sent out of iif1 and received in iif2 by the default namespace. All packets are then routed using the default routing instance. These packets with destination IP iip2 are self destined packets and hence they will be handed over to the appropriate application deamons running in the default namespace.
+This rule does source NAT for all packets that are routed through if1 and changes the source IP to ip_address1 and source port to a port number between 62000 and 65000. This source port translation is required to handle the usage of same source port number by two different external sources. Original source IP & port will be saved & tracked using the linux conntrack table for doing the appropriate reverse NAT for reply packets. After changing the source IP  & source port, packets are sent out of iif1 and received in iif2 by the default namespace. All packets are then routed using the default routing instance. These packets with destination IP ip_address2 are self destined packets and hence they will be handed over to the appropriate application deamons running in the default namespace.
 
 
 ### OUTGOING PACKET ROUTING
@@ -119,7 +119,7 @@ This command will be executed in the management namespace (VRF) context and henc
 This section explains the flow for internal applications like DNS, TACACS, SNMP trap, that are used by the application daemons like SSH (uses TACACS), Ping (uses DNS), SNMPD (sends traps). Daemons use the internal POSIX APIs of internal applications to generate the packets. If such packets need to travel via the management namespace, user should configure "--use-mgmt-vrf" as part of the server  address configuration.
 These application modules use the following DNAT & SNAT iptables rules to send the packets from default VRF context to the management VRF context and to route them through management namespace via management interface. Application specific design enhancement is explained below in the appropriate sections.
 
-   1) Destination IP address of packet is changed to "iip1". This results in default VRF routing instance to send all the packets to veth pair, resulting in reaching management namespace. This is an example for tacacs that uses the port number 62000 for the tacacs server, which is explained in detail in tacacs implementation section.
+   1) Destination IP address of packet is changed to "ip_address1". This results in default VRF routing instance to send all the packets to veth pair, resulting in reaching management namespace. This is an example for tacacs that uses the port number 62000 for the tacacs server, which is explained in detail in tacacs implementation section.
 
     C15: Create DNAT rule for tacacs server IP address
          ip netns exec management iptables -t nat -A PREROUTING -i if1 -p tcp --dport 62000 -j DNAT --to-destination <actual_tacacs_server_ip>:<dport_of_tacacs_server>
@@ -194,11 +194,11 @@ As part of this enhancement, TACACS module maintains a pool of 10 internal port 
 During initialization, module maintains this pool of 10 port numbers as "free" and it maintains the next available free port number for tacacs client to use.
 It updates the tacacs configuration file /etc/pam.d/common-auth-sonic using the following configuration.
 
-Ex: When user configures "config tacacs  add --use-mgmt-vrf 10.11.55.40", it fetches the next available free port (ex: 62000) and configures the destination IP for tacacs packet as "iip1" (ex: 192.168.1.1) with the next available free port (62000) as destination port as follows.
+Ex: When user configures "config tacacs  add --use-mgmt-vrf 10.11.55.40", it fetches the next available free port (ex: 62000) and configures the destination IP for tacacs packet as "ip_address1" (ex: 127.100.100.1) with the next available free port (62000) as destination port as follows.
 
-    auth    [success=done new_authtok_reqd=done default=ignore]     pam_tacplus.so server=192.168.1.1:62000 secret= login=pap timeout=5 try_first_pass
+    auth    [success=done new_authtok_reqd=done default=ignore]     pam_tacplus.so server=127.100.100.1:62000 secret= login=pap timeout=5 try_first_pass
 
-With this tacacs configuration, when user connects to the device using SSH, the tacacs application will generate an IP packet with destination IP as iip1 (192.168.1.1) and destination port as "dp1" (62000).
+With this tacacs configuration, when user connects to the device using SSH, the tacacs application will generate an IP packet with destination IP as ip_address1 (127.100.100.1) and destination port as "dp1" (62000).
 This packet is then routed in default namespace context, which results in sending this packet throught the veth pair to management namespace.
 Such packets arriving in if1 will then be processed by management VRF (namespace). Using the PREROUTING rule specified below, DNAT will be applied to change the destination IP to the actual tacacs server IP address and the destination port to the actual tacacs server destination port number.
 
