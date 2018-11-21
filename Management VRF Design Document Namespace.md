@@ -3,9 +3,8 @@
 ## Introduction
 Management VRF is a subset of Virtual Routing and Forwarding (VRF), and provides a separation between the management network traffic and the data plane network traffic. For all VRFs the main routing table is the default table for all data plane ports. With management VRF a second routing table "management", is used for routing through the management ethernet ports of the switch. 
 
-The following design for Management VRF leverages Linux Stretch kernel(4.9) Namespace concept for implementing management VRF on SONiC; refer to [design comparison](#design_comparison) for trade-offs of that approach vs. l3mdev-based design. 
-Note that the document uses the words VRF and Namespace interchangeably, both meaning the VRF.
- 
+The design for Management VRF leverages Linux Stretch kernel(4.9) Namespace concept for implementing management VRF on SONiC. 
+
 ## Requirements
 | Req. No | Description                                                                                                | Priority | Comments |
 |---:     |---                                                                                                         |---       |---       |
@@ -25,30 +24,30 @@ Note that the document uses the words VRF and Namespace interchangeably, both me
 
 The Scope of this design document is only limited to management VRF. "eth0" is the only port that is part of management VRF; Front Panel Ports (shortly called FPP) are not part of management VRF; design can be extended in future if required.
 
+Note that the document uses the words VRF and Namespace interchangeably, both meaning the VRF.
+
 ## Design
 Namespaces are a feature of the Linux kernel that partitions kernel resources such that one set of processes sees one set of resources while another set of processes sees a different set of resources. 
 Without namespace (NS), the set of network interfaces and routing table entries are shared across the linux operating system. Network namespaces virtualize these shared resources by providing different and separate instances of network interfaces and routing tables that operate independently of each other, thereby providing the required isolation for management traffic & data traffic.
 
-As of this writing, SONiC uses Debian Stretch, based on Linux 4.9 kernel, which has limited VRF support. E.g., it does not support the `CGROUPS_BPF` feature which is required for associating the application to a particular VRF. Full fledged VRF support is available only in Linux 4.15 and above. This means that the l3mdev based solution is not feasible without doing enhancements in linux kernel and in application code. Hence, the l3mdev based VRF solution has been dropped and namespace based solution has been chosen.
-
-By default, linux comes up with the default namespace, all interfaces will be part of this default namespace. Whenever management VRF support is requried, a new namespace by name "management" is created and the management port "eth0" is moved to this namespace. Following linux commands shall be internally used for creating the same. Commands used in this document are numbered as C1, C2, C3, etc., that are referred in other sub-sections of this document.
+By default, linux comes up with the default namespace, all interfaces will be part of this default namespace. Whenever management VRF support is required, a new namespace by name "management" is created and the management interface "eth0" is moved to this namespace. Rest of the ports remain in the default VRF. Following linux commands shall be internally used for creating the same. Commands used in this document are numbered as C1, C2, C3, etc., that are referred in other sub-sections of this document.
 
     C1: ip netns add management
     C2: ip link set dev eth0 netns management
 
 The default namespace (also called default VRF) enables access to the front panel ports (FPP) and the the management namespace (also called management VRF) enables access to the management interface.
-Each new VRF created will map to a corresponding Linux namespace of the same name. Once if the namespace is created, all the configuration related to the namespace happens using the "ip netns exec <vrfname>" command of linux. 
-For example, IP address for the management port eth0 is assigned using the command "ip netns exec management ifconfig eth0 10.11.150.19/24" and the default route is added to the management routing table using "ip netns exec management ip route add default via 10.11.150.1".
+Each new VRF created will map to a corresponding Linux namespace of the same name. After creating the namespace is created, all the configuration related to the namespace happens using the "ip netns exec <vrfname>" command of linux. 
+For example, IP address for the management port eth0 is assigned using the command "ip netns exec management ifconfig eth0 10.11.150.19/24" and the default route is added to the management routing table using "ip netns exec management ip route add default via 10.11.150.1". When interfaces are moved from one namespace to another namespace, previously configured IP address & related routes are removed by linux. Design takes care of reconfiguring them using the "ip netns exec" command.
  
      C3: ip netns exec management ifconfig eth0 <eth0_ip/mask>
      C4: ip netns exec management ip route add default via <def_gw_ip_addr>
 
-All processes (application daemons) are running in the default namespace context.
-In order to make the applications to work in both management VRF and in default VRF, these applications use the following "veth pair" solution. The veth devices are virtual Ethernet devices that act as tunnels between network namespaces to create a bridge to a physical network device in another namespace. Logical representation of the default VRF, management VRF and the way they talk to each other using veth pair is shown in the following diagram.
+All the application daemons like SSHD,SNMPD,etc., are running in the default namespace context.
+In order to make the applications to handle packets arriving in both management VRF and in default VRF, these applications use the following "veth pair" solution. The veth devices are virtual Ethernet devices that act as tunnels between network namespaces to create a bridge to a physical network device in another namespace. Logical representation of the default VRF, management VRF and the way they talk to each other using veth pair is shown in the following diagram.
 
 ![VethPair](Management%20VRF%20Design%20Document%20NS%20VethPair.svg "VRF Representation with Veth Pair") 
 
-Two new internal interfaces "if1" and "if2" are created and they are attached to the veth pair as peers. "if1" is attached to management NS and "if2" is attached to default NS. Internal IP addresses "iip1" and "iip2" are confgiured to them for internal communication. The internal IP address fr iip1 & iip2 are set to 192.168.1.1 & 192.168.1.2 as an example; it can be changed to 127.100.100.1 & 127.100.100.2 (or any other IP address) if there is no conflicting applications using the 127 Network. Following linux commands are internally used for creating the same.
+Two new internal interfaces "if1" and "if2" are created and they are attached to the veth pair as peers. "if1" is attached to management NS and "if2" is attached to default NS. Internal IP addresses "ip_addr1" and "ip_addr2" are confgiured to them for internal communication. These internal IP addresses ip_addr1 & ip_addr2 are set to 127.100.100.1 & 127.100.100.2 as an example after reordering the already available DOCKER rules in iptables. Following linux commands are internally used for creating the configuring the veth pair and the related internal interfaces.
 
     C5: Create if2 & have it in veth pair with peer interface as if1
         ip link add name if2 type veth peer name if1
@@ -160,16 +159,6 @@ As specified in the solution, additional scripts are added, viz,  "/etc/network/
     7. As part of DNAT rules, port numbers corresponding to the application deamons SSH, FTP, HTTP, HTTPS, SNMP, TFTP are added to accept packets from those applications. If any other application port number should be accepted in management interface, correponding DNAT rule should be added using the command C12 in linux shell.
     
 
-#### ConfigDB Schema
-The upgraded config_db.json schema to store the flag for enabling/disabling management VRF is as follows. Default value is set to false (by default management VRF is disabled). Users can enable it using the "config vrf enable-mgmt-vrf" command as explained above.
-
-```
-"MANAGEMENT_VRF_CONFIG": {
-    "vrf_global": {
-        "enable_mgmt_vrf": "false" 
-     }
-}
-```
 
 #### Show Commands
 Following show commands need to be implemented to display the VRF configuration.
@@ -251,59 +240,82 @@ Applications like "apt-get", "ntp", "scp", "sftp", "tftp", "wget" are expected t
 When these applications are triggered from the device, use "ip netns exec management <command>" to run them in management VRF context. 
 
 
-## Phase2
+## Management VRF Configuration
 
-Instead of using the static scripts/steps, new CLI commands for configuration and show will be provided to create and delete VRF using config commands. Config-save command will be used to save the configuration to config_db. CLI commands, DB schema and other details will be explained in at later sections of this document.
+This section explains the new set of configuration required for management VRF.
+ConfigDB schema is enhanced to create a new tag "MANAGEMENT_VRF_CONFIG" where the management VRF specific configuration parameters are stored.
 
-### Configuration Commands
-The following CLI can be used to Configure and show vrf's.
+### Mangement VRF ConfigDB Schema
+The upgraded config_db.json schema to store the flag for enabling/disabling management VRF is as follows.
+
 ```
-config vrf add/del <vrfName>
-config vrf member add/del <vrfName> <interfaceName>
-show vrf config
-show vrf brief
-show vrf <vrfname>
+"MANAGEMENT_VRF_CONFIG": {
+    "vrf_global": {
+        "enable_mgmt_vrf": "false" 
+        "mgmt_vrfname": "management"
+     }
+}
 ```
-The following modules will be affected in phase-2 for management VRF configuration.
+Default value for "enabled_mgmt_vrf" is "false" and the default value for "mgmt_vrfname" is "management".
+Users shall enable the management VRF by setting the "enable_mgmt_vrf" to "true". Users can also modify the default name for the management VRF.
 
-* swss
-  * cfgmgr
-    * vrfmgrd.cpp
-    * vrfmgr.cpp
+### Management VRF Config Commands
+Following config command is provided to configure the same.
 
-Configure vrf using the config cli above, this triggers the vrfmgrd to create/delete the VRF in Linux. Changes to configuration files for services are required for services to run per VRF instance.
+```
+   config vrf enable-mgmt-vrf
+   config vrf disable-mgmt-vrf
+   config vrf mgmt-vrfname <mgmt_vrfname>
+```   
+A new module "vrf configuration manager" is added to listen for the configuration changes that happen in ConfigDB for "MANAGEMENT_VRF_CONFIG".
+Its implemented as part of the python scrtip /usr/bin/vrfcfgd.
+This subscribes for the MANAGEMENT_VRF_CONFIG and listens for ConfigDB events that are triggered as and when the configuration is modified. 
 
-## Linux Upgrade
-When SONiC upgrades to use kernel versions >= 4.10, `ip vrf exec` command will be available and enhanced iproute2 utilities available. Applications can be spawned in the context of the VRF. E.g., when user connects to the device via management port eth0, the shell spawned for them will be bound to the management VRF context.
+### Confguring Management Interface Eth0
 
-The namespace based design explained in this document will not be required after the upgrade.  Minimal changes will be required to support multiple services or configuration files across multiple VRF's; changes will be required to run IP services per VRF, we will revisit this and update the design document accordingly in future.
+There is no config command available to configure the parameters related to MGMT_INTERFACE present in ConfigDB. Minigraph.xml is the alternate way using which the MGMT_INTERFACE parameters can be configured.
+This is enhanced to provide the following config commands to configure the eth0 IP address and the associated default route. If IP address have to be obtained via DHCP, this static IP address configuration is not required.
+
+#### MGMT_INTERFACE ConfigDB Schema
+The  existing config_db.json schema to store the MGMT_INTERFACE related parameters is as follows.
+
+```
+"MGMT_INTERFACE": {
+    "eth0|ip_address/prefix": {
+        "forced_mgmt_routes": {
+        },
+        "gwaddr": "<gw_ip_addr>" 
+    }
+}
+```
+#### MGMT_INTERFACE Config Commands
+New config commands are added as follows to configure the IP address and gateway address.
+
+```
+   config managementip add <ip_address/prefix> <default_gw_addr>
+   config managementip del <ip_address/prefix>
+```   
+This configuration is independent of the management VRF configuration. 
+
+### Configuration Sequence
+When user upgrades to the new SONiC software with management VRF support, the images comes up as usual without management VRF enabled. Users shall follow the following steps to enable & use the management VRF.
+
+**Step1**
+If static IP address is required for the management interface eth0, users shall first configure the MGMT_INTERFACE attributes using the commands given above. If DHCP is required, this configuration can be skipped.
+Example: config managementip add 10.16.206.92/24 10.16.206.1
+
+**Step2**
+Enable management vrf.
+Example: config vrf enable-mgmt-vrf.
+When management vrf is enabled, the VRF configuration manager "vrfcfgd" module listens for this configuration changes and does the following.
+
+1. If the management vrf is enabled from the default disabled state, it restarts the "config-interfaces" service.
+2. If the management vrf is disabled from the previous enabled state, it first deletes the previous created management namespace and then it restarts the "interfaces-config" service.
+
+"interfaces-config" service is enhanced to create the required debian configuration files "/etc/network/interfaces" and '/etc/network/interfaces.management" using the jinja templates. It then restarts the networking service that takes care of bringing up the interfaces in appropriate namespaces. The newly added scripts "/etc/network/if-pre-up.d/netns" and "/etc/netns/if-up.d/netns" takes care of executing the management namespace linux commands and configures the eth0 interface accordingly. In case if management VRF is disabled, all these changes are reverted back to move the eth0 back to default VRF; this is taken care by linux when the management namespace is deleted.
+
 
 ## Appendix
-
-### <a name="design_comparison"></a>Design Approach Comparison
-| Features         | Namespace                    | L3MDev
-|---               |---                           |---
-| Kernel Support   | Yes                          | Yes
-| Scalability      | Limited                      | Better
-| Protocol support | IP services replicated       | IP services enslaved to a L3 interface
-| Performance      | Service replication overhead | Shared services
-| Implementation   | No kernel/app change         | Kernel patch & App code change required.
-
-The Linux kernel has brought in the l3mdev primarily to provide the VRF solution in the L3 layer. Linux kernel upgrades are also targetted towards using the L3mdev solution for VRF. Industry also uses l3mdev as the solution for VRF. But, the l3mdev support present in 4.9 kernel is limited. It is not possible to meet all the requirements without patching the kernel and without changing the application code. Hence, it is decided to use namespace solution for supporting the VRF requirements. The alternate solution that is based on "l3mdev" (given below) has been ignored due to the reasons stated below.
-
-### L3MDEV Based Design
-This solution is based on creating a separate routing table for management network. 
-L3 Master Device (l3mdev) is based on L3 domains that correlate to a specific FIB table. Network interfaces are enslaved to an l3mdev device uniquely associating those interfaces with an L3 domain. Packets going through devices enslaved to an l3mdev device use the FIB table configured for the device for routing, forwarding and addressing decisions. The key here is the enslavement only affects L3 decisions. 
-
-With l3mdev on 4.9 kernel, VRFs are created and enslaved to an L3 Interface and services like ssh can be shared across VRFs thereby avoiding overhead of running multiple instances of IP services. i.e. entire network stack is not replicated using l3mdev.
-
-Applications like Ping, Traceroute & DHCP client already operate on a per-interface (that maps to VRF) basis. E.g., Ping accepts `-I` to specify the interface in which the ping should happen; DHCP client is enabled on a per-interface basis; hence, no enhancement is required in those application packages to run them on the required VRF. 
-
-But, the 4.9 kernel does not support accepting UDP packets in both management VRF & data VRF. Kernel patch is required to patch `udp_l3mdev_accept` from higher kernel version. Similarly, other applications, like DNS & apt-get, do not have facility to run them on a particular interface (that maps to VRF) and always operate on default VRF. In order to make them operate via management VRF those application package code needs to be modified to specify the VRF through which they need to run. Changes are required to force the packets originated from the device to do the lookup on management routing table instead of looking up the default routing table. 
-
-
-### Default Routing Table For Management Traffic
-This option is based on non-standard way of visualizing the routing table. By default, all data traffic are handled via "default routing table". But, this is not mandatory. Instead, create a "blue VRF" and associate all front-panel ports to "blue VRF" and management port (eth0) is associated to default VRF. The "default VRF routing table" is "management VRF routing table" and "blue VRF routing table" as the "data routing table". This is a perception change. All the device originated applications (like DNS, apt-get) operating via management network need not be modified. They will continue to use default routing table (i.e., management VRF routing table) and send traffic via management port. Applications like Ping, Traceroute and DHCP client already operates on per-interface basis. This is not prototyped and hence there is no proof that applications can work without any change. Lastly none of the industry use this kind of perception change and hence this design option is dropped.
 
 ### Alternate Solution Options for Bootup Sequence
 There are multiple ways in which the management namespace can be created in SONiC. The chosen solution explained in Design section is based on the solution provided at https://github.com/m0kct/debian-netns 
