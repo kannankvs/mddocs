@@ -260,7 +260,7 @@ Default value for "enabled_mgmt_vrf" is "false" and the default value for "mgmt_
 Users shall enable the management VRF by setting the "enable_mgmt_vrf" to "true". Users can also modify the default name for the management VRF.
 
 ### Management VRF Config Commands
-Following config command is provided to configure the same.
+Following config command are provided to enable or disable the management VRF and to configure the management vrfname.
 
 ```
    config vrf enable-mgmt-vrf
@@ -268,16 +268,16 @@ Following config command is provided to configure the same.
    config vrf mgmt-vrfname <mgmt_vrfname>
 ```   
 A new module "vrf configuration manager" is added to listen for the configuration changes that happen in ConfigDB for "MANAGEMENT_VRF_CONFIG".
-Its implemented as part of the python scrtip /usr/bin/vrfcfgd.
-This subscribes for the MANAGEMENT_VRF_CONFIG and listens for ConfigDB events that are triggered as and when the configuration is modified. 
+Its implemented as part of the python script /usr/bin/vrfcfgd.
+This subscribes for the MANAGEMENT_VRF_CONFIG with the ConfigDB and listens for ConfigDB events that are triggered as and when the configuration is modified. 
 
 ### Confguring Management Interface Eth0
 
 There is no config command available to configure the parameters related to MGMT_INTERFACE present in ConfigDB. Minigraph.xml is the alternate way using which the MGMT_INTERFACE parameters can be configured.
-This is enhanced to provide the following config commands to configure the eth0 IP address and the associated default route. If IP address have to be obtained via DHCP, this static IP address configuration is not required.
+This is enhanced to provide the following config commands to configure the eth0 IP address and the associated default route. If IP address have to be obtained via DHCP, this static IP address configuration is not required. This configuration is independent of management VRF configuration.
 
 #### MGMT_INTERFACE ConfigDB Schema
-The  existing config_db.json schema to store the MGMT_INTERFACE related parameters is as follows.
+The  existing config_db.json schema for the MGMT_INTERFACE related attributes shown below is reused without any change.
 
 ```
 "MGMT_INTERFACE": {
@@ -289,7 +289,7 @@ The  existing config_db.json schema to store the MGMT_INTERFACE related paramete
 }
 ```
 #### MGMT_INTERFACE Config Commands
-New config commands are added as follows to configure the IP address and gateway address.
+To configure the management interface IP and the associated default gateway address, following new config commands are added.
 
 ```
    config managementip add <ip_address/prefix> <default_gw_addr>
