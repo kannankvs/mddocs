@@ -1,6 +1,6 @@
 
-Management VRF Design Document
-==============================
+Management VRF Design
+=====================
 
 
 Table of Contents
