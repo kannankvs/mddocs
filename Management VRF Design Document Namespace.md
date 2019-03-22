@@ -1,8 +1,8 @@
 <header>
-% Management VRF Design Document
+Management VRF Design Document
 =============================
 </header>
-
+<main>
 Table of Contents
 =================
 
@@ -370,3 +370,4 @@ This option is to use “ip netns exec” linux calls instead of following the n
 2. If user explicitly executes the "systemctl restart networking" command directly from linux shell, the  VRF configuration will be lost. This needs further investigation on solving all such cases. 
 
 Due to the reasons given above, the solution given at https://github.com/m0kct/debian-netns is chosen and explained earlier in design section.
+</main>
