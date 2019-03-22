@@ -1,7 +1,7 @@
-<header>
-Management VRF Design Document
-=============================
-</header>
+
+% Management VRF Design Document
+
+
 <main>
 Table of Contents
 =================
